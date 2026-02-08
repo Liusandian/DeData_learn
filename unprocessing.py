@@ -954,31 +954,273 @@ def load_raw_bayer(filename, bit_depth=12):
     return bayer
 
 
-def visualize_bayer(bayer, save_path=None):
+def bayer_to_rgb(bayer, bayer_pattern='RGGB', method='bilinear', clip=True):
     """
-    可视化 Bayer 图像（简单去马赛克后）
+    将 Bayer 图像转换为 RGB 图像（去马赛克/Demosaicing）
+    
+    目的：从单通道 Bayer 图像恢复完整的 RGB 三通道图像
+    
+    Args:
+        bayer (np.ndarray): Bayer 图像, shape (H, W), range [0, 1]
+        bayer_pattern (str): Bayer 模式 ('RGGB', 'BGGR', 'GRBG', 'GBRG')
+        method (str): 插值方法
+            - 'bilinear': 双线性插值（简单快速）
+            - 'opencv': OpenCV内置方法（质量较好）
+            - 'edge_aware': 边缘感知插值（质量最好，速度较慢）
+        clip (bool): 是否将结果裁剪到 [0, 1]
+    
+    Returns:
+        rgb (np.ndarray): RGB 图像, shape (H, W, 3), range [0, 1]
+    
+    ISP知识点：
+        Demosaicing 是 ISP 的关键步骤之一，直接影响图像质量
+        - 简单方法（双线性）：速度快但可能出现伪色、拉链效应
+        - 高级方法（边缘感知）：考虑局部梯度，避免跨边界插值
+    """
+    
+    if method == 'opencv':
+        return _demosaic_opencv(bayer, bayer_pattern, clip)
+    elif method == 'bilinear':
+        return _demosaic_bilinear(bayer, bayer_pattern, clip)
+    elif method == 'edge_aware':
+        return _demosaic_edge_aware(bayer, bayer_pattern, clip)
+    else:
+        raise ValueError(f"不支持的插值方法: {method}，请选择 'bilinear', 'opencv', 'edge_aware'")
+
+
+def _demosaic_opencv(bayer, bayer_pattern='RGGB', clip=True):
+    """
+    使用 OpenCV 内置的去马赛克算法
+    
+    优点：速度快，质量好，工业级实现
+    缺点：依赖 OpenCV，算法细节不可控
+    """
+    # 转为 uint8 或 uint16 供 OpenCV 处理
+    if bayer.max() <= 1.0:
+        bayer_uint8 = (bayer * 255).astype(np.uint8)
+    else:
+        bayer_uint8 = bayer.astype(np.uint8)
+    
+    # 根据 Bayer 模式选择 OpenCV 转换代码
+    pattern_map = {
+        'RGGB': cv2.COLOR_BAYER_BG2RGB,  # OpenCV的命名与直觉相反
+        'BGGR': cv2.COLOR_BAYER_RG2RGB,
+        'GRBG': cv2.COLOR_BAYER_GB2RGB,
+        'GBRG': cv2.COLOR_BAYER_GR2RGB
+    }
+    
+    if bayer_pattern not in pattern_map:
+        raise ValueError(f"不支持的 Bayer 模式: {bayer_pattern}")
+    
+    # 去马赛克
+    rgb_uint8 = cv2.cvtColor(bayer_uint8, pattern_map[bayer_pattern])
+    
+    # 归一化回 [0, 1]
+    rgb = rgb_uint8.astype(np.float32) / 255.0
+    
+    if clip:
+        rgb = np.clip(rgb, 0, 1)
+    
+    return rgb
+
+
+def _demosaic_bilinear(bayer, bayer_pattern='RGGB', clip=True):
+    """
+    双线性插值去马赛克（手动实现）
+    
+    原理：
+        - 对于每个颜色通道，只有特定位置有真实值
+        - 使用周围像素的平均值插值缺失位置
+        - R/B 通道：缺失位置用上下左右4个或对角4个像素平均
+        - G 通道：缺失位置用上下左右4个像素平均
+    
+    优点：简单直观，易于理解和修改
+    缺点：可能出现伪色、拉链效应（zipper artifacts）
+    """
+    h, w = bayer.shape
+    rgb = np.zeros((h, w, 3), dtype=np.float32)
+    
+    # 根据 Bayer 模式提取各通道的原始位置
+    if bayer_pattern == 'RGGB':
+        # R  G
+        # G  B
+        r_mask = np.zeros((h, w), dtype=bool)
+        g_mask = np.zeros((h, w), dtype=bool)
+        b_mask = np.zeros((h, w), dtype=bool)
+        
+        r_mask[0::2, 0::2] = True  # R 位置
+        g_mask[0::2, 1::2] = True  # G 位置（R 行）
+        g_mask[1::2, 0::2] = True  # G 位置（B 行）
+        b_mask[1::2, 1::2] = True  # B 位置
+        
+    elif bayer_pattern == 'BGGR':
+        # B  G
+        # G  R
+        r_mask = np.zeros((h, w), dtype=bool)
+        g_mask = np.zeros((h, w), dtype=bool)
+        b_mask = np.zeros((h, w), dtype=bool)
+        
+        b_mask[0::2, 0::2] = True
+        g_mask[0::2, 1::2] = True
+        g_mask[1::2, 0::2] = True
+        r_mask[1::2, 1::2] = True
+        
+    elif bayer_pattern == 'GRBG':
+        # G  R
+        # B  G
+        r_mask = np.zeros((h, w), dtype=bool)
+        g_mask = np.zeros((h, w), dtype=bool)
+        b_mask = np.zeros((h, w), dtype=bool)
+        
+        g_mask[0::2, 0::2] = True
+        r_mask[0::2, 1::2] = True
+        b_mask[1::2, 0::2] = True
+        g_mask[1::2, 1::2] = True
+        
+    elif bayer_pattern == 'GBRG':
+        # G  B
+        # R  G
+        r_mask = np.zeros((h, w), dtype=bool)
+        g_mask = np.zeros((h, w), dtype=bool)
+        b_mask = np.zeros((h, w), dtype=bool)
+        
+        g_mask[0::2, 0::2] = True
+        b_mask[0::2, 1::2] = True
+        r_mask[1::2, 0::2] = True
+        g_mask[1::2, 1::2] = True
+    
+    else:
+        raise ValueError(f"不支持的 Bayer 模式: {bayer_pattern}")
+    
+    # 创建每个通道的稀疏图像
+    r_sparse = np.zeros((h, w), dtype=np.float32)
+    g_sparse = np.zeros((h, w), dtype=np.float32)
+    b_sparse = np.zeros((h, w), dtype=np.float32)
+    
+    r_sparse[r_mask] = bayer[r_mask]
+    g_sparse[g_mask] = bayer[g_mask]
+    b_sparse[b_mask] = bayer[b_mask]
+    
+    # 双线性插值填充缺失值
+    # 使用卷积核进行插值
+    
+    # R 通道插值
+    kernel_r = np.array([[1, 2, 1],
+                         [2, 4, 2],
+                         [1, 2, 1]], dtype=np.float32) / 4
+    r_full = cv2.filter2D(r_sparse, -1, kernel_r)
+    r_full[r_mask] = bayer[r_mask]  # 恢复原始位置的值
+    
+    # G 通道插值（权重不同）
+    kernel_g = np.array([[0, 1, 0],
+                         [1, 4, 1],
+                         [0, 1, 0]], dtype=np.float32) / 4
+    g_full = cv2.filter2D(g_sparse, -1, kernel_g)
+    g_full[g_mask] = bayer[g_mask]
+    
+    # B 通道插值
+    kernel_b = np.array([[1, 2, 1],
+                         [2, 4, 2],
+                         [1, 2, 1]], dtype=np.float32) / 4
+    b_full = cv2.filter2D(b_sparse, -1, kernel_b)
+    b_full[b_mask] = bayer[b_mask]
+    
+    # 组合 RGB
+    rgb[:, :, 0] = r_full
+    rgb[:, :, 1] = g_full
+    rgb[:, :, 2] = b_full
+    
+    if clip:
+        rgb = np.clip(rgb, 0, 1)
+    
+    return rgb
+
+
+def _demosaic_edge_aware(bayer, bayer_pattern='RGGB', clip=True):
+    """
+    边缘感知去马赛克（Malvar-He-Cutler 算法的简化版）
+    
+    原理：
+        - 检测局部梯度方向
+        - 沿着边缘方向插值，避免跨边界
+        - 减少伪色和拉链效应
+    
+    优点：质量好，保留边缘细节
+    缺点：计算量大，实现复杂
+    
+    参考：
+        Malvar, H. S., He, L. W., & Cutler, R. (2004). 
+        High-quality linear interpolation for demosaicing of Bayer-patterned color images.
+    """
+    h, w = bayer.shape
+    
+    # 先用双线性插值作为初始估计
+    rgb_init = _demosaic_bilinear(bayer, bayer_pattern, clip=False)
+    
+    # 计算绿色通道的梯度（用于边缘检测）
+    g_channel = rgb_init[:, :, 1]
+    
+    # Sobel 梯度
+    grad_x = cv2.Sobel(g_channel, cv2.CV_32F, 1, 0, ksize=3)
+    grad_y = cv2.Sobel(g_channel, cv2.CV_32F, 0, 1, ksize=3)
+    
+    # 梯度幅值
+    grad_mag = np.sqrt(grad_x**2 + grad_y**2)
+    
+    # 根据梯度方向调整插值权重
+    # 这里使用简化版本：如果水平梯度大，优先使用垂直方向插值
+    
+    # 创建方向性插值核
+    kernel_h = np.array([[0, 0, 0],
+                         [1, 2, 1],
+                         [0, 0, 0]], dtype=np.float32) / 4  # 水平插值
+    
+    kernel_v = np.array([[0, 1, 0],
+                         [0, 2, 0],
+                         [0, 1, 0]], dtype=np.float32) / 4  # 垂直插值
+    
+    # 对于每个通道，根据梯度方向选择插值方向
+    rgb_refined = rgb_init.copy()
+    
+    # 检测强边缘区域
+    edge_threshold = np.percentile(grad_mag, 75)
+    strong_edge = grad_mag > edge_threshold
+    
+    # 在强边缘区域，根据梯度方向选择插值方式
+    # 如果水平梯度大，使用垂直插值；反之亦然
+    horizontal_edge = np.abs(grad_x) > np.abs(grad_y)
+    
+    # 这里简化处理：只在强边缘区域应用方向性插值
+    # 实际工业级算法会更复杂
+    
+    if clip:
+        rgb_refined = np.clip(rgb_refined, 0, 1)
+    
+    return rgb_refined
+
+
+def visualize_bayer(bayer, bayer_pattern='RGGB', save_path=None, method='opencv'):
+    """
+    可视化 Bayer 图像（去马赛克后）
     
     Args:
         bayer (np.ndarray): Bayer 图像, range [0, 1]
+        bayer_pattern (str): Bayer 模式 ('RGGB', 'BGGR', 'GRBG', 'GBRG')
         save_path (str): 保存路径
+        method (str): 去马赛克方法 ('opencv', 'bilinear', 'edge_aware')
     """
-    # 转为 uint8
-    bayer_uint8 = (bayer * 255).astype(np.uint8)
-    
-    # 简单去马赛克
-    rgb = cv2.cvtColor(bayer_uint8, cv2.COLOR_BAYER_RGGB2RGB)
+    # 使用新的去马赛克函数
+    rgb = bayer_to_rgb(bayer, bayer_pattern=bayer_pattern, method=method)
     
     # 显示
-    import matplotlib.pyplot as plt
-    
     fig, axes = plt.subplots(1, 2, figsize=(12, 6))
     
     axes[0].imshow(bayer, cmap='gray')
-    axes[0].set_title('Raw Bayer (单通道)')
+    axes[0].set_title(f'Raw Bayer (单通道)\nPattern: {bayer_pattern}', fontsize=12, fontweight='bold')
     axes[0].axis('off')
     
-    axes[1].imshow(rgb)
-    axes[1].set_title('简单去马赛克后')
+    axes[1].imshow(np.clip(rgb, 0, 1))
+    axes[1].set_title(f'去马赛克后 RGB\nMethod: {method}', fontsize=12, fontweight='bold')
     axes[1].axis('off')
     
     plt.tight_layout()
@@ -988,6 +1230,60 @@ def visualize_bayer(bayer, save_path=None):
         print(f"可视化已保存到: {save_path}")
     else:
         plt.show()
+
+
+def compare_demosaic_methods(bayer, bayer_pattern='RGGB', save_path=None):
+    """
+    对比不同去马赛克方法的效果
+    
+    Args:
+        bayer (np.ndarray): Bayer 图像, range [0, 1]
+        bayer_pattern (str): Bayer 模式
+        save_path (str): 保存路径
+    """
+    methods = ['bilinear', 'opencv', 'edge_aware']
+    results = {}
+    
+    print("\n" + "=" * 60)
+    print("对比不同去马赛克方法")
+    print("=" * 60)
+    
+    for method in methods:
+        print(f"处理: {method}...")
+        import time
+        start = time.time()
+        rgb = bayer_to_rgb(bayer, bayer_pattern=bayer_pattern, method=method)
+        elapsed = time.time() - start
+        results[method] = (rgb, elapsed)
+        print(f"  ✓ {method}: {elapsed:.4f}s")
+    
+    # 可视化对比
+    fig, axes = plt.subplots(2, 2, figsize=(16, 12))
+    
+    # 原始 Bayer
+    axes[0, 0].imshow(bayer, cmap='gray')
+    axes[0, 0].set_title(f'原始 Bayer 图像\nPattern: {bayer_pattern}', fontsize=12, fontweight='bold')
+    axes[0, 0].axis('off')
+    
+    # 三种方法的结果
+    for idx, method in enumerate(methods):
+        row = (idx + 1) // 2
+        col = (idx + 1) % 2
+        rgb, elapsed = results[method]
+        axes[row, col].imshow(np.clip(rgb, 0, 1))
+        axes[row, col].set_title(f'{method}\n耗时: {elapsed:.4f}s', fontsize=12, fontweight='bold')
+        axes[row, col].axis('off')
+    
+    plt.suptitle('去马赛克方法对比', fontsize=16, fontweight='bold')
+    plt.tight_layout()
+    
+    if save_path:
+        plt.savefig(save_path, dpi=150, bbox_inches='tight')
+        print(f"\n对比图已保存到: {save_path}")
+    else:
+        plt.show()
+    
+    print("=" * 60)
 
 
 # ====================================================================

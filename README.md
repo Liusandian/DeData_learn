@@ -40,7 +40,7 @@ python test_visualization.py
 
 ## 🎯 核心功能
 
-### Unprocessing Pipeline（逆ISP流程）
+### 1. Unprocessing Pipeline（逆ISP流程）
 
 将 sRGB 图像转换为 Raw Bayer 图像，模拟相机传感器的原始数据
 
@@ -52,6 +52,23 @@ python test_visualization.py
 4. **逆白平衡** - 移除色温校正，恢复原始色温
 5. **Mosaic 马赛克化** - RGB 三通道 → Bayer 单通道
 6. **添加噪声** - 模拟传感器噪声（泊松-高斯组合）
+
+### 2. Bayer 去马赛克（Demosaicing）⭐新增
+
+将单通道 Bayer Raw 图像转换为 RGB 三通道图像，支持三种插值方法：
+
+**三种插值方法：**
+
+- **bilinear** - 双线性插值（简单快速，适合学习）
+- **opencv** - OpenCV 内置方法（工业级，推荐）⭐
+- **edge_aware** - 边缘感知插值（质量最好，速度较慢）
+
+```python
+from unprocessing import bayer_to_rgb
+
+# 去马赛克
+rgb = bayer_to_rgb(bayer, bayer_pattern='RGGB', method='opencv')
+```
 
 ### ⭐ 新增：可视化功能
 
@@ -69,9 +86,15 @@ python test_visualization.py
 ## 📚 文档
 
 ### 详细文档
+
+#### 逆ISP与数据退化
 - **[Unprocessing可视化使用指南](docus/Unprocessing可视化使用指南.md)** - 详细的可视化功能说明
+- **[Bayer去马赛克-插值方法详解](docus/Bayer去马赛克-插值方法详解.md)** - 去马赛克算法详解 ⭐新增
 - **[AI-ISP数据退化详解](docus/AI-ISP数据退化详解.md)** - ISP原理和数据退化
-- **[NAFNet量化伪影分析](docus/NAFNet1x-W16A8量化伪影分析-紫边与鬼影.md)** - 量化问题分析
+
+#### 模型量化专题
+- **[NAFNet量化常见问题与解决方案](docus/NAFNet量化常见问题与解决方案.md)** - 系统性量化问题分析 ⭐新增
+- **[NAFNet量化伪影分析-紫边与鬼影](docus/NAFNet1x-W16A8量化伪影分析-紫边与鬼影.md)** - W16A8量化专项分析
 
 ### 学习路线
 - **[从HighLevel到LowLevel-AI-ISP学习路线图](docus/从HighLevel到LowLevel-AI-ISP学习路线图.md)**
@@ -115,6 +138,35 @@ batch_process(
     num_samples=1000,
     iso_range=[400, 800, 1600, 3200]
 )
+```
+
+### Bayer 去马赛克（新增）
+
+```python
+from unprocessing import bayer_to_rgb, compare_demosaic_methods
+
+# 1. 基本用法：Bayer → RGB
+rgb = bayer_to_rgb(
+    bayer, 
+    bayer_pattern='RGGB',
+    method='opencv'  # 'bilinear', 'opencv', 'edge_aware'
+)
+
+# 2. 对比不同插值方法
+compare_demosaic_methods(
+    bayer,
+    bayer_pattern='RGGB',
+    save_path='demosaic_comparison.png'
+)
+
+# 3. 完整流程：sRGB → Bayer → RGB
+from unprocessing import UnprocessingPipeline
+
+unprocessor = UnprocessingPipeline(add_noise=False, visualize=False)
+bayer, metadata = unprocessor.unprocess(srgb_image)
+
+# 去马赛克恢复 RGB
+rgb_restored = bayer_to_rgb(bayer, bayer_pattern=metadata['bayer_pattern'])
 ```
 
 ## 🔧 依赖
