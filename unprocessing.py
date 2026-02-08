@@ -13,6 +13,35 @@ import numpy as np
 import cv2
 import argparse
 from pathlib import Path
+import matplotlib.pyplot as plt
+import os
+from matplotlib import font_manager
+
+
+def _configure_matplotlib_fonts():
+    """配置 Matplotlib 中文字体，避免标题乱码。"""
+    preferred_fonts = [
+        "Microsoft YaHei",
+        "SimHei",
+        "SimSun",
+        "Noto Sans CJK SC",
+        "Source Han Sans CN",
+        "PingFang SC",
+        "Arial Unicode MS",
+    ]
+    available_fonts = {font.name for font in font_manager.fontManager.ttflist}
+    for font_name in preferred_fonts:
+        if font_name in available_fonts:
+            plt.rcParams["font.sans-serif"] = [font_name]
+            break
+    else:
+        # Fallback to a default font with decent unicode coverage.
+        plt.rcParams["font.sans-serif"] = ["DejaVu Sans"]
+    plt.rcParams["font.family"] = "sans-serif"
+    plt.rcParams["axes.unicode_minus"] = False
+
+
+_configure_matplotlib_fonts()
 
 
 class UnprocessingPipeline:
@@ -25,7 +54,9 @@ class UnprocessingPipeline:
                  random_ccm=True,
                  random_gains=True,
                  add_noise=True,
-                 bayer_pattern='RGGB'):
+                 bayer_pattern='RGGB',
+                 visualize=True,
+                 output_dir='visualization'):
         """
         初始化 Unprocessing Pipeline
         
@@ -34,11 +65,19 @@ class UnprocessingPipeline:
             random_gains (bool): 是否随机采样白平衡增益
             add_noise (bool): 是否添加噪声
             bayer_pattern (str): Bayer 模式 ('RGGB', 'BGGR', 'GRBG', 'GBRG')
+            visualize (bool): 是否保存可视化结果
+            output_dir (str): 可视化结果保存目录
         """
         self.random_ccm = random_ccm
         self.random_gains = random_gains
         self.add_noise_flag = add_noise
         self.bayer_pattern = bayer_pattern
+        self.visualize = visualize
+        self.output_dir = output_dir
+        
+        # 创建可视化目录
+        if self.visualize:
+            os.makedirs(self.output_dir, exist_ok=True)
         
         # 平均逆 CCM（来自论文，统计多个相机的平均值）
         self.ccm_inv_mean = np.array([
@@ -54,7 +93,295 @@ class UnprocessingPipeline:
         print(f"随机白平衡: {random_gains}")
         print(f"添加噪声: {add_noise}")
         print(f"Bayer 模式: {bayer_pattern}")
+        print(f"可视化: {visualize}")
+        if visualize:
+            print(f"可视化目录: {output_dir}")
         print("=" * 60)
+    
+    def _visualize_comparison(self, img_before, img_after, title_before, title_after, 
+                              filename, suptitle="", cmap_before=None, cmap_after=None):
+        """
+        可视化对比：左边原图，右边处理后
+        
+        Args:
+            img_before: 处理前的图像
+            img_after: 处理后的图像
+            title_before: 左图标题
+            title_after: 右图标题
+            filename: 保存文件名
+            suptitle: 总标题
+            cmap_before: 左图colormap（灰度图用'gray'）
+            cmap_after: 右图colormap
+        """
+        if not self.visualize:
+            return
+        
+        fig, axes = plt.subplots(1, 2, figsize=(16, 6))
+        
+        # 左图：处理前
+        if cmap_before:
+            axes[0].imshow(np.clip(img_before, 0, 1), cmap=cmap_before)
+        else:
+            axes[0].imshow(np.clip(img_before, 0, 1))
+        axes[0].set_title(title_before, fontsize=14, fontweight='bold')
+        axes[0].axis('off')
+        
+        # 添加统计信息
+        stats_before = f"Min: {img_before.min():.4f}\nMax: {img_before.max():.4f}\nMean: {img_before.mean():.4f}"
+        axes[0].text(0.02, 0.98, stats_before, transform=axes[0].transAxes,
+                    fontsize=10, verticalalignment='top',
+                    bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8))
+        
+        # 右图：处理后
+        if cmap_after:
+            axes[1].imshow(np.clip(img_after, 0, 1), cmap=cmap_after)
+        else:
+            axes[1].imshow(np.clip(img_after, 0, 1))
+        axes[1].set_title(title_after, fontsize=14, fontweight='bold')
+        axes[1].axis('off')
+        
+        # 添加统计信息
+        stats_after = f"Min: {img_after.min():.4f}\nMax: {img_after.max():.4f}\nMean: {img_after.mean():.4f}"
+        axes[1].text(0.02, 0.98, stats_after, transform=axes[1].transAxes,
+                    fontsize=10, verticalalignment='top',
+                    bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8))
+        
+        if suptitle:
+            plt.suptitle(suptitle, fontsize=16, fontweight='bold', y=0.98)
+        
+        plt.tight_layout()
+        
+        save_path = os.path.join(self.output_dir, filename)
+        plt.savefig(save_path, dpi=150, bbox_inches='tight')
+        plt.close()
+        
+        print(f"  ✓ 可视化已保存: {save_path}")
+    
+    def _visualize_noise_detail(self, clean, noisy, noise_map, iso):
+        """
+        可视化噪声的详细信息：干净图、噪声图、噪声分布直方图
+        
+        Args:
+            clean: 干净图像
+            noisy: 噪声图像
+            noise_map: 噪声图 (noisy - clean)
+            iso: ISO值
+        """
+        if not self.visualize:
+            return
+        
+        fig = plt.figure(figsize=(18, 5))
+        
+        # 子图1：干净图像
+        ax1 = plt.subplot(1, 4, 1)
+        ax1.imshow(clean, cmap='gray', vmin=0, vmax=1)
+        ax1.set_title('干净图像', fontsize=12, fontweight='bold')
+        ax1.axis('off')
+        
+        # 子图2：噪声图像
+        ax2 = plt.subplot(1, 4, 2)
+        ax2.imshow(noisy, cmap='gray', vmin=0, vmax=1)
+        ax2.set_title(f'噪声图像 (ISO {iso})', fontsize=12, fontweight='bold')
+        ax2.axis('off')
+        
+        # 子图3：噪声图（放大显示）
+        ax3 = plt.subplot(1, 4, 3)
+        noise_vis = ax3.imshow(noise_map, cmap='RdBu_r', vmin=-0.1, vmax=0.1)
+        ax3.set_title('噪声分布 (放大)', fontsize=12, fontweight='bold')
+        ax3.axis('off')
+        plt.colorbar(noise_vis, ax=ax3, fraction=0.046)
+        
+        # 子图4：噪声直方图
+        ax4 = plt.subplot(1, 4, 4)
+        ax4.hist(noise_map.flatten(), bins=100, alpha=0.7, color='steelblue', edgecolor='black')
+        ax4.set_title('噪声分布直方图', fontsize=12, fontweight='bold')
+        ax4.set_xlabel('噪声值', fontsize=10)
+        ax4.set_ylabel('频次', fontsize=10)
+        ax4.grid(True, alpha=0.3)
+        
+        # 添加统计信息
+        noise_stats = f"均值: {noise_map.mean():.6f}\n标准差: {noise_map.std():.6f}\nMin: {noise_map.min():.6f}\nMax: {noise_map.max():.6f}"
+        ax4.text(0.95, 0.95, noise_stats, transform=ax4.transAxes,
+                fontsize=9, verticalalignment='top', horizontalalignment='right',
+                bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8))
+        
+        plt.suptitle(f'噪声详细分析 (ISO={iso}, 泊松-高斯组合噪声)', 
+                     fontsize=14, fontweight='bold')
+        plt.tight_layout()
+        
+        save_path = os.path.join(self.output_dir, 'step6_noise_detail.png')
+        plt.savefig(save_path, dpi=150, bbox_inches='tight')
+        plt.close()
+        
+        print(f"  ✓ 噪声详细分析已保存: {save_path}")
+    
+    def _visualize_pipeline_summary(self, srgb, linear, linear_scaled, camera_rgb, 
+                                    camera_rgb_wb, bayer, bayer_noisy, metadata):
+        """
+        可视化整个Pipeline的流程总结
+        
+        Args:
+            srgb: 步骤0 - 输入sRGB图像
+            linear: 步骤1 - 线性RGB
+            linear_scaled: 步骤2 - 扩展动态范围
+            camera_rgb: 步骤3 - 相机RGB
+            camera_rgb_wb: 步骤4 - 逆白平衡
+            bayer: 步骤5 - Bayer图
+            bayer_noisy: 步骤6 - 带噪声Bayer
+            metadata: 元数据
+        """
+        if not self.visualize:
+            return
+        
+        fig = plt.figure(figsize=(20, 12))
+        
+        # 使用GridSpec来更好地控制布局
+        gs = fig.add_gridspec(3, 3, hspace=0.3, wspace=0.2)
+        
+        # 步骤0: 输入sRGB
+        ax0 = fig.add_subplot(gs[0, 0])
+        ax0.imshow(np.clip(srgb, 0, 1))
+        ax0.set_title('步骤0: 输入 sRGB\n(Gamma编码)', fontsize=11, fontweight='bold')
+        ax0.axis('off')
+        
+        # 步骤1: 线性RGB
+        ax1 = fig.add_subplot(gs[0, 1])
+        ax1.imshow(np.clip(linear, 0, 1))
+        ax1.set_title('步骤1: 线性 RGB\n(逆Gamma)', fontsize=11, fontweight='bold')
+        ax1.axis('off')
+        ax0.annotate('', xy=(1.05, 0.5), xytext=(0.95, 0.5), 
+                    xycoords=ax0.transAxes, textcoords=ax1.transAxes,
+                    arrowprops=dict(arrowstyle='->', lw=2, color='red'))
+        
+        # 步骤2: 扩展动态范围
+        ax2 = fig.add_subplot(gs[0, 2])
+        ax2.imshow(np.clip(linear_scaled, 0, 1))
+        scale = metadata.get('tone_scale', 1.0)
+        ax2.set_title(f'步骤2: 扩展动态范围\n(scale={scale:.3f})', fontsize=11, fontweight='bold')
+        ax2.axis('off')
+        ax1.annotate('', xy=(1.05, 0.5), xytext=(0.95, 0.5), 
+                    xycoords=ax1.transAxes, textcoords=ax2.transAxes,
+                    arrowprops=dict(arrowstyle='->', lw=2, color='red'))
+        
+        # 步骤3: 相机RGB
+        ax3 = fig.add_subplot(gs[1, 0])
+        ax3.imshow(np.clip(camera_rgb, 0, 1))
+        ax3.set_title('步骤3: 相机 RGB\n(逆CCM)', fontsize=11, fontweight='bold')
+        ax3.axis('off')
+        ax2.annotate('', xy=(0.5, 1.1), xytext=(0.1, 0.9), 
+                    xycoords=ax3.transAxes, textcoords=ax2.transAxes,
+                    arrowprops=dict(arrowstyle='->', lw=2, color='red'))
+        
+        # 步骤4: 逆白平衡
+        ax4 = fig.add_subplot(gs[1, 1])
+        ax4.imshow(np.clip(camera_rgb_wb, 0, 1))
+        gains = metadata.get('wb_gains', {})
+        ax4.set_title(f'步骤4: 逆白平衡\n(R:{gains.get("red", 0):.2f}, B:{gains.get("blue", 0):.2f})', 
+                     fontsize=11, fontweight='bold')
+        ax4.axis('off')
+        ax3.annotate('', xy=(1.05, 0.5), xytext=(0.95, 0.5), 
+                    xycoords=ax3.transAxes, textcoords=ax4.transAxes,
+                    arrowprops=dict(arrowstyle='->', lw=2, color='red'))
+        
+        # 步骤5: Bayer
+        ax5 = fig.add_subplot(gs[1, 2])
+        ax5.imshow(bayer, cmap='gray', vmin=0, vmax=1)
+        pattern = metadata.get('bayer_pattern', 'RGGB')
+        ax5.set_title(f'步骤5: Bayer Pattern\n({pattern})', fontsize=11, fontweight='bold')
+        ax5.axis('off')
+        ax4.annotate('', xy=(1.05, 0.5), xytext=(0.95, 0.5), 
+                    xycoords=ax4.transAxes, textcoords=ax5.transAxes,
+                    arrowprops=dict(arrowstyle='->', lw=2, color='red'))
+        
+        # 步骤6: 带噪声Bayer
+        ax6 = fig.add_subplot(gs[2, 0])
+        ax6.imshow(bayer_noisy, cmap='gray', vmin=0, vmax=1)
+        iso = metadata.get('iso', 100)
+        ax6.set_title(f'步骤6: 添加噪声\n(ISO={iso})', fontsize=11, fontweight='bold')
+        ax6.axis('off')
+        ax5.annotate('', xy=(0.5, 1.1), xytext=(0.5, 0.9), 
+                    xycoords=ax6.transAxes, textcoords=ax5.transAxes,
+                    arrowprops=dict(arrowstyle='->', lw=2, color='red'))
+        
+        # Bayer Pattern示意图
+        ax7 = fig.add_subplot(gs[2, 1])
+        bayer_demo = self._create_bayer_pattern_demo()
+        ax7.imshow(bayer_demo)
+        ax7.set_title(f'Bayer Pattern 示意图\n({pattern})', fontsize=11, fontweight='bold')
+        ax7.axis('off')
+        
+        # 添加流程说明文本
+        ax8 = fig.add_subplot(gs[2, 2])
+        ax8.axis('off')
+        summary_text = f"""
+Unprocessing Pipeline 完整流程
+=====================================
+
+输入: sRGB 图像 ({metadata['input_shape']})
+输出: Raw Bayer 图像 ({metadata['output_shape']})
+
+关键参数:
+• 色调缩放: {metadata.get('tone_scale', 1.0):.4f}
+• 白平衡增益:
+  - Red: {gains.get('red', 0):.3f}
+  - Green: {gains.get('green', 1.0):.3f}
+  - Blue: {gains.get('blue', 0):.3f}
+• Bayer模式: {pattern}
+• ISO: {iso}
+• 噪声: {'已添加' if metadata.get('noise_added') else '未添加'}
+
+流程说明:
+1. 逆Gamma: sRGB → 线性域
+2. 逆色调映射: 扩展动态范围
+3. 逆CCM: sRGB → 相机色彩空间
+4. 逆白平衡: 移除色温校正
+5. Mosaic: RGB → Bayer单通道
+6. 添加噪声: 模拟传感器噪声
+        """
+        ax8.text(0.1, 0.9, summary_text, fontsize=10, 
+                verticalalignment='top', family='monospace',
+                bbox=dict(boxstyle='round', facecolor='lightblue', alpha=0.3))
+        
+        plt.suptitle('Unprocessing Pipeline 完整流程总结 (sRGB → Raw Bayer)', 
+                     fontsize=16, fontweight='bold', y=0.98)
+        
+        save_path = os.path.join(self.output_dir, 'pipeline_summary.png')
+        plt.savefig(save_path, dpi=150, bbox_inches='tight')
+        plt.close()
+        
+        print(f"\n  ✓ Pipeline总结已保存: {save_path}")
+    
+    def _create_bayer_pattern_demo(self):
+        """创建Bayer Pattern示意图"""
+        size = 200
+        demo = np.zeros((size, size, 3), dtype=np.float32)
+        
+        cell_size = size // 4
+        
+        if self.bayer_pattern == 'RGGB':
+            # R G
+            # G B
+            demo[0:size//2, 0:size//2, 0] = 1.0  # R
+            demo[0:size//2, size//2:, 1] = 1.0   # G
+            demo[size//2:, 0:size//2, 1] = 1.0   # G
+            demo[size//2:, size//2:, 2] = 1.0    # B
+        elif self.bayer_pattern == 'BGGR':
+            demo[0:size//2, 0:size//2, 2] = 1.0  # B
+            demo[0:size//2, size//2:, 1] = 1.0   # G
+            demo[size//2:, 0:size//2, 1] = 1.0   # G
+            demo[size//2:, size//2:, 0] = 1.0    # R
+        elif self.bayer_pattern == 'GRBG':
+            demo[0:size//2, 0:size//2, 1] = 1.0  # G
+            demo[0:size//2, size//2:, 0] = 1.0   # R
+            demo[size//2:, 0:size//2, 2] = 1.0   # B
+            demo[size//2:, size//2:, 1] = 1.0    # G
+        elif self.bayer_pattern == 'GBRG':
+            demo[0:size//2, 0:size//2, 1] = 1.0  # G
+            demo[0:size//2, size//2:, 2] = 1.0   # B
+            demo[size//2:, 0:size//2, 0] = 1.0   # R
+            demo[size//2:, size//2:, 1] = 1.0    # G
+        
+        return demo
     
     def unprocess(self, srgb_image, iso=None, verbose=True):
         """
@@ -93,6 +420,15 @@ class UnprocessingPipeline:
         if verbose:
             print(f"  输出范围: [{linear.min():.4f}, {linear.max():.4f}]")
         
+        # 可视化
+        self._visualize_comparison(
+            img, linear,
+            "输入: sRGB 图像\n(Gamma 编码后)",
+            "输出: 线性 RGB\n(Gamma 校正前)",
+            "step1_inverse_gamma.png",
+            "步骤 1: 逆 Gamma 校正 (sRGB → Linear RGB)"
+        )
+        
         # ========== 步骤 2: 逆色调映射 ==========
         if verbose:
             print("\n步骤 2: 逆色调映射")
@@ -101,6 +437,15 @@ class UnprocessingPipeline:
         if verbose:
             print(f"  缩放因子: {scale:.4f}")
             print(f"  输出范围: [{linear_scaled.min():.4f}, {linear_scaled.max():.4f}]")
+        
+        # 可视化
+        self._visualize_comparison(
+            linear, linear_scaled,
+            "输入: 线性 RGB\n(LDR 动态范围)",
+            f"输出: 扩展动态范围\n(缩放因子: {scale:.4f})",
+            "step2_inverse_tone_mapping.png",
+            "步骤 2: 逆色调映射 (扩展动态范围，模拟 Raw HDR)"
+        )
         
         # ========== 步骤 3: 逆色彩校正 ==========
         if verbose:
@@ -119,6 +464,15 @@ class UnprocessingPipeline:
         if verbose:
             print(f"  输出范围: [{camera_rgb.min():.4f}, {camera_rgb.max():.4f}]")
         
+        # 可视化
+        self._visualize_comparison(
+            linear_scaled, camera_rgb,
+            "输入: sRGB 色彩空间",
+            "输出: 相机原生色彩空间\n(CCM^-1 变换后)",
+            "step3_inverse_color_correction.png",
+            "步骤 3: 逆色彩校正 (sRGB → Camera RGB)"
+        )
+        
         # ========== 步骤 4: 逆白平衡 ==========
         if verbose:
             print("\n步骤 4: 逆白平衡")
@@ -130,6 +484,16 @@ class UnprocessingPipeline:
             print(f"  Blue Gain:  {gains['blue']:.3f}")
             print(f"  输出范围: [{camera_rgb_inv_wb.min():.4f}, {camera_rgb_inv_wb.max():.4f}]")
         
+        # 可视化
+        gain_info = f"R:{gains['red']:.2f}, G:{gains['green']:.2f}, B:{gains['blue']:.2f}"
+        self._visualize_comparison(
+            camera_rgb, camera_rgb_inv_wb,
+            "输入: 白平衡后的图像\n(色温已校正)",
+            f"输出: 白平衡前的图像\n(恢复原始色温)\nGains: {gain_info}",
+            "step4_inverse_white_balance.png",
+            "步骤 4: 逆白平衡 (移除色温校正，恢复原始色调)"
+        )
+        
         # ========== 步骤 5: Mosaic ==========
         if verbose:
             print("\n步骤 5: Mosaic（马赛克化）")
@@ -139,6 +503,16 @@ class UnprocessingPipeline:
             print(f"  Bayer 模式: {self.bayer_pattern}")
             print(f"  输出形状: {bayer.shape}")
             print(f"  输出范围: [{bayer.min():.4f}, {bayer.max():.4f}]")
+        
+        # 可视化（特殊处理：左边RGB，右边单通道Bayer）
+        self._visualize_comparison(
+            camera_rgb_inv_wb, bayer,
+            "输入: RGB 三通道\n(每个像素有R、G、B值)",
+            f"输出: Bayer 单通道\n(模式: {self.bayer_pattern}，每个像素只保留一个颜色)",
+            "step5_mosaic.png",
+            "步骤 5: Mosaic 马赛克化 (RGB → Bayer Pattern)",
+            cmap_after='gray'
+        )
         
         # ========== 步骤 6: 添加噪声 ==========
         if self.add_noise_flag:
@@ -158,6 +532,23 @@ class UnprocessingPipeline:
                 noise_level = np.std(bayer_noisy - bayer)
                 print(f"  噪声水平 (std): {noise_level:.6f}")
                 print(f"  输出范围: [{bayer_noisy.min():.4f}, {bayer_noisy.max():.4f}]")
+            
+            # 可视化
+            self._visualize_comparison(
+                bayer, bayer_noisy,
+                "输入: 干净的 Bayer 图像\n(无噪声)",
+                f"输出: 带噪声的 Bayer 图像\n(ISO: {iso}, 噪声σ: {noise_level:.6f})",
+                "step6_add_noise.png",
+                f"步骤 6: 添加相机噪声 (泊松-高斯组合噪声模型，ISO={iso})",
+                cmap_before='gray',
+                cmap_after='gray'
+            )
+            
+            # 额外：可视化噪声本身
+            if self.visualize:
+                noise_map = bayer_noisy - bayer
+                self._visualize_noise_detail(bayer, bayer_noisy, noise_map, iso)
+                
         else:
             bayer_noisy = bayer
             metadata['iso'] = 100
@@ -166,6 +557,11 @@ class UnprocessingPipeline:
                 print("\n步骤 6: 跳过添加噪声")
         
         metadata['output_shape'] = bayer_noisy.shape
+        
+        # ========== 最终总结可视化 ==========
+        if self.visualize:
+            self._visualize_pipeline_summary(img, linear, linear_scaled, camera_rgb, 
+                                            camera_rgb_inv_wb, bayer, bayer_noisy, metadata)
         
         if verbose:
             print("\n" + "=" * 60)
@@ -607,7 +1003,13 @@ def main():
     parser.add_argument(
         '--visualize',
         action='store_true',
-        help='可视化结果'
+        help='保存每个步骤的可视化对比图'
+    )
+    parser.add_argument(
+        '--vis-dir',
+        type=str,
+        default='visualization',
+        help='可视化结果保存目录'
     )
     
     args = parser.parse_args()
@@ -630,7 +1032,9 @@ def main():
         random_ccm=True,
         random_gains=True,
         add_noise=not args.no_noise,
-        bayer_pattern=args.bayer_pattern
+        bayer_pattern=args.bayer_pattern,
+        visualize=args.visualize,
+        output_dir=args.vis_dir
     )
     
     # Unprocessing
