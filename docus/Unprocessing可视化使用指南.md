@@ -15,14 +15,31 @@
 
 | 文件名 | 内容 | 说明 |
 |--------|------|------|
-| `step1_inverse_gamma.png` | 逆Gamma校正 | sRGB → 线性RGB |
-| `step2_inverse_tone_mapping.png` | 逆色调映射 | 扩展动态范围（LDR→HDR） |
-| `step3_inverse_color_correction.png` | 逆色彩校正 | sRGB色彩空间 → 相机原生色彩空间 |
-| `step4_inverse_white_balance.png` | 逆白平衡 | 移除色温校正，恢复原始色调 |
-| `step5_mosaic.png` | Mosaic马赛克化 | RGB三通道 → Bayer单通道 |
-| `step6_add_noise.png` | 添加噪声 | 干净Bayer → 带噪声Bayer |
+| `step1_inverse_gamma.png` | 逆Gamma校正（对比图） | sRGB → 线性RGB |
+| `step1_inverse_gamma_before.png` | 处理前单独图像 | 原始分辨率 ⭐新增 |
+| `step1_inverse_gamma_after.png` | 处理后单独图像 | 原始分辨率 ⭐新增 |
+| `step2_inverse_tone_mapping.png` | 逆色调映射（对比图） | 扩展动态范围（LDR→HDR） |
+| `step2_inverse_tone_mapping_before.png` | 处理前单独图像 | 原始分辨率 ⭐新增 |
+| `step2_inverse_tone_mapping_after.png` | 处理后单独图像 | 原始分辨率 ⭐新增 |
+| `step3_inverse_color_correction.png` | 逆色彩校正（对比图） | sRGB色彩空间 → 相机原生色彩空间 |
+| `step3_inverse_color_correction_before.png` | 处理前单独图像 | 原始分辨率 ⭐新增 |
+| `step3_inverse_color_correction_after.png` | 处理后单独图像 | 原始分辨率 ⭐新增 |
+| `step4_inverse_white_balance.png` | 逆白平衡（对比图） | 移除色温校正，恢复原始色调 |
+| `step4_inverse_white_balance_before.png` | 处理前单独图像 | 原始分辨率 ⭐新增 |
+| `step4_inverse_white_balance_after.png` | 处理后单独图像 | 原始分辨率 ⭐新增 |
+| `step5_mosaic.png` | Mosaic马赛克化（对比图） | RGB三通道 → Bayer单通道 |
+| `step5_mosaic_before.png` | 处理前单独图像 | 原始分辨率 ⭐新增 |
+| `step5_mosaic_after.png` | 处理后单独图像 | 原始分辨率 ⭐新增 |
+| `step6_add_noise.png` | 添加噪声（对比图） | 干净Bayer → 带噪声Bayer |
+| `step6_add_noise_before.png` | 处理前单独图像 | 原始分辨率 ⭐新增 |
+| `step6_add_noise_after.png` | 处理后单独图像 | 原始分辨率 ⭐新增 |
 | `step6_noise_detail.png` | 噪声详细分析 | 噪声分布、直方图 |
 | `pipeline_summary.png` | **完整流程总结** | 所有步骤的可视化汇总 |
+
+**说明**：
+- 每个步骤会生成 **3 张图片**：对比图（左右并排）、处理前原图、处理后原图
+- `_before.png` 和 `_after.png` 是原始分辨率图像，方便放大对比细节
+- 对比图包含统计信息（Min/Max/Mean），方便快速查看数值变化
 
 ---
 
@@ -51,14 +68,28 @@ python unprocessing.py \
 运行后会生成：
 ```
 visualization/
-├── step1_inverse_gamma.png           # 步骤1：逆Gamma
-├── step2_inverse_tone_mapping.png    # 步骤2：逆色调映射
-├── step3_inverse_color_correction.png # 步骤3：逆色彩校正
-├── step4_inverse_white_balance.png   # 步骤4：逆白平衡
-├── step5_mosaic.png                  # 步骤5：Mosaic
-├── step6_add_noise.png               # 步骤6：添加噪声
-├── step6_noise_detail.png            # 步骤6：噪声详细分析
-└── pipeline_summary.png              # 完整流程总结
+├── step1_inverse_gamma.png                    # 步骤1：逆Gamma（对比图）
+├── step1_inverse_gamma_before.png             # 步骤1：处理前原图 ⭐新增
+├── step1_inverse_gamma_after.png              # 步骤1：处理后原图 ⭐新增
+├── step2_inverse_tone_mapping.png             # 步骤2：逆色调映射（对比图）
+├── step2_inverse_tone_mapping_before.png      # 步骤2：处理前原图 ⭐新增
+├── step2_inverse_tone_mapping_after.png       # 步骤2：处理后原图 ⭐新增
+├── step3_inverse_color_correction.png         # 步骤3：逆色彩校正（对比图）
+├── step3_inverse_color_correction_before.png  # 步骤3：处理前原图 ⭐新增
+├── step3_inverse_color_correction_after.png   # 步骤3：处理后原图 ⭐新增
+├── step4_inverse_white_balance.png            # 步骤4：逆白平衡（对比图）
+├── step4_inverse_white_balance_before.png     # 步骤4：处理前原图 ⭐新增
+├── step4_inverse_white_balance_after.png      # 步骤4：处理后原图 ⭐新增
+├── step5_mosaic.png                           # 步骤5：Mosaic（对比图）
+├── step5_mosaic_before.png                    # 步骤5：处理前原图 ⭐新增
+├── step5_mosaic_after.png                     # 步骤5：处理后原图 ⭐新增
+├── step6_add_noise.png                        # 步骤6：添加噪声（对比图）
+├── step6_add_noise_before.png                 # 步骤6：处理前原图 ⭐新增
+├── step6_add_noise_after.png                  # 步骤6：处理后原图 ⭐新增
+├── step6_noise_detail.png                     # 步骤6：噪声详细分析
+└── pipeline_summary.png                       # 完整流程总结
+
+总计：每个步骤 3 张图（对比图 + 前后独立图）× 6 步骤 + 2 张汇总图 = 20 张图片
 ```
 
 ---

@@ -116,6 +116,7 @@ class UnprocessingPipeline:
         if not self.visualize:
             return
         
+        # ========== 1. 保存对比图 ==========
         fig, axes = plt.subplots(1, 2, figsize=(16, 6))
         
         # 左图：处理前
@@ -155,7 +156,43 @@ class UnprocessingPipeline:
         plt.savefig(save_path, dpi=150, bbox_inches='tight')
         plt.close()
         
-        print(f"  ✓ 可视化已保存: {save_path}")
+        print(f"  ✓ 对比图已保存: {save_path}")
+        
+        # ========== 2. 保存独立的原始分辨率图像 ==========
+        base_name = filename.replace('.png', '')
+        
+        # 保存处理前的图像
+        before_path = os.path.join(self.output_dir, f"{base_name}_before.png")
+        self._save_single_image(img_before, before_path, cmap_before)
+        
+        # 保存处理后的图像
+        after_path = os.path.join(self.output_dir, f"{base_name}_after.png")
+        self._save_single_image(img_after, after_path, cmap_after)
+        
+        print(f"  ✓ 独立图像已保存: {base_name}_before.png / {base_name}_after.png")
+    
+    def _save_single_image(self, img, save_path, cmap=None):
+        """
+        保存单张原始分辨率图像
+        
+        Args:
+            img: 图像数据
+            save_path: 保存路径
+            cmap: colormap（灰度图用'gray'）
+        """
+        fig = plt.figure(figsize=(10, 10))
+        ax = fig.add_subplot(111)
+        
+        if cmap:
+            ax.imshow(np.clip(img, 0, 1), cmap=cmap)
+        else:
+            ax.imshow(np.clip(img, 0, 1))
+        
+        ax.axis('off')
+        plt.tight_layout(pad=0)
+        
+        plt.savefig(save_path, dpi=150, bbox_inches='tight', pad_inches=0)
+        plt.close()
     
     def _visualize_noise_detail(self, clean, noisy, noise_map, iso):
         """
