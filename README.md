@@ -95,6 +95,7 @@ rgb = bayer_to_rgb(bayer, bayer_pattern='RGGB', method='opencv')
 #### 模型量化专题
 - **[NAFNet量化常见问题与解决方案](docus/NAFNet量化常见问题与解决方案.md)** - 系统性量化问题分析 ⭐新增
 - **[NAFNet量化伪影分析-紫边与鬼影](docus/NAFNet1x-W16A8量化伪影分析-紫边与鬼影.md)** - W16A8量化专项分析
+- **[时域滤波器对NN伪影的处理局限性分析](docus/时域滤波器对NN伪影的处理局限性分析.md)** - MATF对规律性伪影的局限 ⭐新增
 
 ### 学习路线
 - **[从HighLevel到LowLevel-AI-ISP学习路线图](docus/从HighLevel到LowLevel-AI-ISP学习路线图.md)**
