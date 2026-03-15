@@ -2,6 +2,8 @@
 # Develop an NMS algorithm function
 import numpy as np
 
+# test for dell local ubutu server,103  ip
+
 def nms(boxes, scores, iou_threshold=0.5):
 	"""
 	非极大值抑制 (NMS)
